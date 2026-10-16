@@ -1,0 +1,13 @@
+{
+  "model": "sonnet",
+  "outputStyle": "Explanatory",
+  "permissions": {
+    "defaultMode": "plan",
+    "deny": [
+      "Read(./.env)",
+      "Edit(./.env)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
+    ]
+  }
+}
