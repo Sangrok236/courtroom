@@ -1,6 +1,10 @@
+import hmac
+import os
+
 import streamlit as st
 
 import ai
+import budget
 import engine
 import flow
 from cases.case01 import CASE
@@ -8,8 +12,51 @@ from cases.case01 import CASE
 BADGES = {'added': '🆕 신규', 'revised': '✏️ 수정됨'}
 
 st.set_page_config(page_title='법정의 모순', page_icon='⚖️', layout='centered')
+
+
+def load_deploy_secrets():
+    """Streamlit Cloud의 Secrets(.streamlit/secrets.toml)를 환경 변수로 옮긴다. 로컬 .env나 이미 설정된 환경 변수가 우선한다."""
+    try:
+        for key, value in st.secrets.items():
+            if isinstance(value, (str, int, float, bool)):
+                os.environ.setdefault(key, str(value))
+    except Exception:  # 로컬 실행처럼 secrets가 없으면 건너뛴다.
+        pass
+
+
+def require_password():
+    """COURTROOM_PASSWORD가 설정되어 있으면 암호를 맞춰야 게임이 보인다(공개 링크를 아는 사람 중 일부만 들이고 싶을 때)."""
+    password = os.getenv('COURTROOM_PASSWORD', '')
+    if not password or st.session_state.get('authed'):
+        return
+    st.title('⚖️ 법정의 모순')
+    with st.form('login'):
+        entered = st.text_input('접속 암호', type='password')
+        submitted = st.form_submit_button('입장')
+    if submitted and hmac.compare_digest(entered.encode(), password.encode()):
+        st.session_state.authed = True
+        st.rerun()
+    if submitted:
+        st.error('암호가 맞지 않습니다.')
+    st.stop()
+
+
+load_deploy_secrets()
+require_password()
+
+# 공개 배포에서는 세션마다 AI 호출 예산을 두고(서버 전체 하루 한도도 함께), 바닥나면 간이 모드로 이어 간다.
+# '처음부터 다시'로 예산이 새로 생기지 않도록 예산은 세션에 한 번만 만든다.
+if budget.public_mode():
+    if 'budget' not in st.session_state:
+        st.session_state.budget = budget.CallBudget.from_env()
+    budget.activate(st.session_state.budget)
+else:
+    budget.activate(None)
+
 st.title('⚖️ 법정의 모순')
 st.caption(f'{CASE["title"]} | AI 법정 추리 프로토타입')
+if budget.notice():
+    st.warning(budget.notice())
 
 
 def reset_game():
@@ -57,11 +104,11 @@ with c2:
 tab1, tab2, tab3 = st.tabs(['💬 질문', '📁 증거 제시', '📜 법정 기록'])
 with tab1:
     st.caption(
-        '지금 보고 있는 증언에 대해 질문하세요. 증인은 한 번에 하나의 사실만 말하고, '
-        '그 답변은 이 증언 바로 뒤에 새 증언으로 들어갑니다. 질문만 가능하며 Enter로 제출됩니다.'
+        '지금 보고 있는 증언에 대해 질문하세요.'
+        '답변은 이 증언 바로 뒤에 새 증언으로 들어갑니다. Enter로 제출됩니다.'
     )
     with st.form('ask', clear_on_submit=True):
-        question = st.text_input('증인에게 질문', placeholder='예: 복도 조명이 켜져 있었나요?', disabled=over)
+        question = st.text_input('증인에게 질문', placeholder='질문을 입력', disabled=over)
         submitted = st.form_submit_button('질문하기', disabled=over)
     if submitted and question.strip():
         try:
@@ -73,8 +120,8 @@ with tab1:
         st.rerun()
     if st.session_state.get('ask_error'):
         st.error(st.session_state.ask_error)
-    elif ai.last_error:
-        st.caption(f'⚠️ 최근 AI 오류: {ai.last_error}')
+    elif ai.visible_error():
+        st.caption(f'⚠️ 최근 AI 오류: {ai.visible_error()}')
 with tab2:
     evidence_id = st.selectbox(
         '제시할 증거를 선택하세요',
@@ -86,12 +133,11 @@ with tab2:
     for statement in statements:
         st.markdown(f'- {statement.text}')
     st.caption(
-        '증인이 한 말을 짚어서, 이 증거와 왜 모순인지 대사로 말하세요. 증언 번호는 말하지 않아도 됩니다. '
-        '예: "증인은 9시쯤 복도에서 사람을 마주쳤다고 했고 그때 조명이 켜져 있었다고 했는데, 정전 기록은 그 시각 3층이 정전이었다고 합니다." '
+        '증인이 한 말을 짚어서, 이 증거와 왜 모순인지 대사로 말하세요. '
         'Enter로 제출됩니다.'
     )
     with st.form('present'):
-        claim = st.text_input('대사', placeholder='증인이 한 말을 짚어서, 이 증거와 왜 모순인지 말하세요', disabled=over)
+        claim = st.text_input('대사', placeholder='증인이 한 말을 짚어서, 증거를 토대로 모순을 지적하세요', disabled=over)
         presented = st.form_submit_button('증거 제시', disabled=over)
     if presented:
         with st.spinner('재판부가 판단하는 중...'):

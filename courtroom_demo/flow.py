@@ -24,7 +24,7 @@ def ask_question(case: dict, state: engine.GameState, base_id: int, question: st
     for _ in range(MAX_RETRIES + 1):
         candidate = ai.witness_reply(case, state, question, base, note)
         if not candidate:
-            raise AskError(f'AI 호출에 실패했습니다: {ai.last_error}')
+            raise AskError(f'AI 호출에 실패했습니다: {ai.visible_error()}')
         if not ai.repeats_refuted(case, candidate, state.refuted):
             answer = candidate
             break

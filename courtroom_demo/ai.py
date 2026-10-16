@@ -11,6 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import budget
 import engine
 
 # 실행 위치와 상관없이 ai.py 옆의 .env를 읽는다. 이미 설정된 환경 변수는 덮어쓰지 않는다.
@@ -18,7 +19,8 @@ if not os.getenv('COURTROOM_NO_DOTENV'):  # 테스트·스모크가 실수로 �
     load_dotenv(Path(__file__).resolve().parent / '.env')
 
 CONFIDENCE_MIN = 0.6
-_contradiction_cache: dict[tuple[str, str], dict] = {}
+_contradiction_cache: dict[tuple, dict] = {}
+_CACHE_MAX = 2000  # 공개 배포에서 서버 메모리가 무한정 늘지 않도록 상한을 둔다.
 
 
 last_error = ''  # 마지막 AI 호출 오류(키 값은 마스킹). UI에서 진단용으로 보여 준다.
@@ -29,7 +31,15 @@ def _gemini_key() -> str:
 
 
 def has_api_key() -> bool:
-    return bool(_gemini_key() or os.getenv('OPENAI_API_KEY'))
+    """AI를 쓸 수 있는가. 키가 없거나, 공개 배포에서 이 세션/서버의 AI 호출 예산이 바닥나면 False(키워드 기반 간이 모드)."""
+    return bool(_gemini_key() or os.getenv('OPENAI_API_KEY')) and budget.available()
+
+
+def visible_error() -> str:
+    """화면에 보여 줄 마지막 AI 오류. 공개 배포에서는 내부 정보(프로젝트 번호 등)가 섞일 수 있어 자세한 내용을 숨긴다."""
+    if budget.public_mode():
+        return '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' if last_error else ''
+    return last_error
 
 
 def _provider() -> str:
@@ -89,6 +99,7 @@ def _to_gemini_schema(node):
 
 
 def _call_json(instructions: str, user_input: str, name: str, schema: dict, max_tokens: int, temperature: float) -> dict:
+    budget.spend()  # 공개 배포에서는 호출마다 세션·하루 예산에서 차감한다(실패한 호출도 비용이 들 수 있어 센다).
     try:
         if _provider() == 'gemini':
             return _call_gemini(instructions, user_input, schema, max_tokens, temperature)
@@ -488,6 +499,8 @@ def judge_argument(case: dict, statements: list[str], claim: str, evidence_id: s
             }
         except Exception:
             return dict(_NO_VERDICT)  # 원인은 _call_json이 last_error에 기록했다. 실패는 캐시하지 않는다.
+    if len(_contradiction_cache) >= _CACHE_MAX:
+        _contradiction_cache.clear()
     _contradiction_cache[key] = result
     return result
 

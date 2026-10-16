@@ -39,6 +39,42 @@ API 키 없이도 규칙 기반 대화와 증거 제시를 시험할 수 있습�
 
 증언에는 처음부터 참/거짓 값이 없습니다. 게임은 자기소개 하나로 시작하고, 나머지 증언은 변호인의 질문으로 쌓입니다. 증거가 어떤 증언과 모순되면 증인이 그 증언을 **철회하거나 수정**하고, 한 번 반박된 주장은 거짓말을 하더라도 **다시 말할 수 없습니다**(법정 기록 탭에서 확인). 결정적 증거(정전 기록)로 증언을 반박하면 클리어입니다.
 
+## 다른 컴퓨터에서 실행하기
+
+```powershell
+git clone https://github.com/Sangrok236/courtroom.git
+cd courtroom\courtroom_demo
+copy .env.example .env        # .env에 GEMINI_API_KEY=... 를 채운다(.env는 git에 올라가지 않는다)
+uv run --with streamlit --with google-genai --with openai --with python-dotenv streamlit run app.py
+```
+
+## 인터넷에 공개 배포하기 (Streamlit Community Cloud)
+
+링크만으로 누구나 플레이하게 할 수 있다. **링크를 아는 사람은 내 API 키 비용을 쓰게 되므로 아래 보호 장치를 켜는 것이 중요하다.**
+
+1. 저장소가 GitHub에 올라가 있어야 한다(코드만 올라가고 키는 올라가지 않는다: `.env`, `.streamlit/secrets.toml`은 `.gitignore`).
+2. [share.streamlit.io](https://share.streamlit.io)에서 **Create app** → 저장소 `Sangrok236/courtroom`, 브랜치 `main`, **Main file path** `courtroom_demo/app.py`.
+3. **Advanced settings**에서 Python 버전은 3.12를 권장하고, **Secrets**에 `.streamlit/secrets.toml.example`의 내용을 붙여 넣어 값을 채운다.
+   ```toml
+   GEMINI_API_KEY = "배포용으로 새로 만든 키"
+   COURTROOM_PUBLIC = "1"            # 공개 모드(아래 보호 장치를 켠다)
+   COURTROOM_SESSION_CALLS = "120"   # 접속 1회당 AI 호출 수
+   COURTROOM_DAILY_CALLS = "1500"    # 서버 전체 하루 AI 호출 수
+   # COURTROOM_PASSWORD = "정한_암호"  # 선택: 암호를 아는 사람만 입장
+   ```
+4. Deploy. 코드를 `main`에 push하면 자동으로 다시 배포된다.
+
+공개 모드(`COURTROOM_PUBLIC=1`)가 하는 일:
+- **AI 호출 예산**: 접속 1회당, 그리고 서버 전체 하루 한도를 둔다. 한도를 넘으면 AI 대신 **키워드 기반 간이 모드**로 이어서 진행하고 화면에 안내가 뜬다. 예산은 호출마다(실패한 호출 포함) 차감된다.
+- **오류 숨김**: 화면에는 "일시적인 오류" 정도만 보인다(오류 메시지에 프로젝트 번호 같은 내부 정보가 섞일 수 있다).
+- 로컬 실행(공개 모드가 아님)에는 아무 제한이 없다.
+
+**꼭 알아 둘 한계와 권장 조치**
+- 접속당 한도는 **새로고침하면 다시 열린다.** 실제 방어선은 서버 전체 **하루 한도**이며, 이 값은 서버 메모리에 있어 서버가 재시작되면 0으로 돌아간다.
+- 그래서 **API 제공자 쪽에서도 반드시 한도를 거세요.** 배포 전용 키를 새로 만들고, 결제 한도/쿼터를 낮게 설정하고, 대화에 노출된 키는 폐기하세요.
+- Streamlit Cloud의 앱은 기본이 공개다. 특정 사람만 보게 하려면 앱 공유 설정에서 허용한 계정만 접근하게 하거나 `COURTROOM_PASSWORD`를 쓰세요.
+- 사용량은 AI 제공자 콘솔(Gemini면 Google AI Studio/Cloud의 사용량 화면)에서 확인한다.
+
 ## 진행 방식
 
 1. 증언을 보다가 **질문**합니다(입력창에서 Enter로 제출). 증인은 **한 번에 하나의 사실(한 문장)만** 말하고, 그 답변은 아래에 따로 뜨지 않고 **질문한 증언 바로 뒤에 새 증언으로 삽입**됩니다(1번에서 질문하면 1번과 2번 사이). 한 번 들어온 증언은 취소할 수 없고, 증거로 반박될 때만 철회·수정됩니다. 코드가 답변의 첫 문장만 증언으로 쓰므로 AI가 부연을 붙여도 잘립니다.
